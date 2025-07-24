@@ -1,0 +1,26 @@
+---
+# Recipe for the TES Credential Component
+RecipeFormatVersion: '2020-01-25'
+ComponentName: com.example.TesCredentialComponent
+ComponentVersion: '1.0.0'
+ComponentDescription: A simple component that demonstrates how to use the Token Exchange Service (TES) to obtain AWS credentials.
+ComponentPublisher: Example
+ComponentType: aws.greengrass.generic
+
+# Define component dependencies
+ComponentDependencies:
+  # The TES service is required for this component to function
+  aws.greengrass.TokenExchangeService:
+    VersionRequirement: ">=2.0.0"
+    DependencyType: HARD
+
+# Define the component artifacts and lifecycle
+Manifests:
+  - Platform:
+      os: linux
+    Artifacts:
+      - URI: "component:artifacts/tes-credential-component"
+        Permission:
+          Execute: OWNER
+    Lifecycle:
+      Run: "{artifacts:decompressedPath}/tes-credential-component"
