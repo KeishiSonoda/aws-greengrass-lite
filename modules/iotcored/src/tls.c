@@ -171,9 +171,11 @@ static GglError do_handshake(char *host, BIO *bio) {
 
     assert(ssl != NULL);
 
-    if (SSL_set_tlsext_host_name(ssl, host) != 1) {
-        GGL_LOGE("Failed to configure SNI.");
-        return GGL_ERR_FATAL;
+    if (host != NULL) {
+        if (SSL_set_tlsext_host_name(ssl, host) != 1) {
+            GGL_LOGE("Failed to configure SNI.");
+            return GGL_ERR_FATAL;
+        }
     }
 
     if (SSL_do_handshake(ssl) != 1) {
@@ -251,22 +253,76 @@ static GglError iotcored_proxy_connect_tunnel(
         GGL_LOGE("Failed http proxy connect.");
         return GGL_ERR_FAILURE;
     }
+
     return GGL_ERR_OK;
 }
 
 static GglError iotcored_tls_connect_https_proxy(
     const IotcoredArgs *args, IotcoredTlsCtx **ctx, GglUriInfo info
 ) {
-    (void) args;
-    (void) ctx;
-    (void) info;
-    // default fallback
+    // Set up TLS before attempting a connection
+    SSL_CTX *ssl_ctx = NULL;
+    GglError ret = create_tls_context(args, &ssl_ctx);
+    if (ret != GGL_ERR_OK) {
+        return ret;
+    }
+    GGL_CLEANUP_ID(ctx_cleanup, cleanup_ssl_ctx, ssl_ctx);
+
+    // Default fallback
     if (info.port.len == 0) {
         info.port = GGL_STR("443");
     }
-    // TODO: support this.
-    GGL_LOGE("HTTPS proxy unsupported.");
-    return GGL_ERR_UNSUPPORTED;
+
+    // Connect to proxy via HTTPS
+    BIO *mtls_proxy_bio = BIO_new_ssl_connect(ssl_ctx);
+    if (mtls_proxy_bio == NULL) {
+        GGL_LOGE("Failed to create proxy socket.");
+        return GGL_ERR_FATAL;
+    }
+    if (BIO_set_conn_hostname(mtls_proxy_bio, info.host.data) != 1) {
+        GGL_LOGE("Failed to set proxy hostname.");
+        return GGL_ERR_FATAL;
+    }
+    if (BIO_set_conn_port(mtls_proxy_bio, info.port.data) != 1) {
+        GGL_LOGE("Failed to set proxy port.");
+        return GGL_ERR_FATAL;
+    }
+    GGL_LOGD("Connecting to HTTPS proxy.");
+    ret = do_handshake(NULL, mtls_proxy_bio);
+    if (ret != GGL_ERR_OK) {
+        GGL_LOGE("Failed to connect and handshake with proxy.");
+        return ret;
+    }
+
+    // Connect the proxy server to IoT core and tunnel the connection
+    ret = iotcored_proxy_connect_tunnel(args, info, mtls_proxy_bio);
+    if (ret != GGL_ERR_OK) {
+        return ret;
+    }
+
+    // This BIO is used to talk to IoT core.
+    BIO *mqtt_bio = BIO_new_ssl(ssl_ctx, 1);
+    if (mqtt_bio == NULL) {
+        GGL_LOGE("Failed to create openssl BIO.");
+        return GGL_ERR_FATAL;
+    }
+    // MQTT BIO uses the underlying HTTPS TLS BIO as its source and sync.
+    BIO *mqtt_proxy_chain = BIO_push(mqtt_bio, mtls_proxy_bio);
+
+    // Do handshake with IoT core over the established HTTPS TLS connection.
+    ret = do_handshake(args->endpoint, mqtt_proxy_chain);
+    if (ret != GGL_ERR_OK) {
+        return ret;
+    }
+
+    // Since connection is established, cancel the cleanup.
+    ctx_cleanup = NULL;
+
+    conn = (IotcoredTlsCtx
+    ) { .ssl_ctx = ssl_ctx, .bio = mqtt_proxy_chain, .connected = true };
+    *ctx = &conn;
+
+    return GGL_ERR_OK;
 }
 
 static GglError iotcored_tls_connect_http_proxy(
@@ -309,7 +365,7 @@ static GglError iotcored_tls_connect_http_proxy(
         return GGL_ERR_FAILURE;
     }
 
-    // Perform TLS with the IoT endpoint thru the tunnel
+    // Connect to the HTTP tunnel.
     ret = iotcored_proxy_connect_tunnel(args, info, proxy_bio);
     if (ret != GGL_ERR_OK) {
         return ret;
@@ -322,6 +378,7 @@ static GglError iotcored_tls_connect_http_proxy(
         return ret;
     }
 
+    // Since connection is established, cancel the cleanup.
     ctx_cleanup = NULL;
 
     conn = (IotcoredTlsCtx

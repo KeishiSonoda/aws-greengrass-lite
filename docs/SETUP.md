@@ -39,14 +39,15 @@ layer, or yocto image, these will be set up and configured for you.
 ## Configuring Greengrass
 
 You may configure a single device with the instruction below or a fleet of
-devices with the steps from [Fleet Provisioning guide](FLEET_PROVISIONING.md).
-Choose one or the other.
+devices with the steps from
+[Fleet Provisioning guide](./fleet_provisioning/fleet_provisioning.md). Choose
+one or the other.
 
 To configure Greengrass, you will need a config YAML file, in the same format as
 the Classic nucleus config. An example config file is available in
 [`docs/examples/sample_nucleus_config.yaml`](examples/sample_nucleus_config.yaml).
 If this is the first time you are creating a GG device, please follow the
-instruction in the [TES setup instructions](./TES.md) to get a role alias,
+instruction in the [Provisioning.md](./Provisioning.md) to get a role alias,
 thing, certificate, private key, and endpoints for your device.
 
 Make a copy of the [sample configuration](./examples/sample_nucleus_config.yaml)
